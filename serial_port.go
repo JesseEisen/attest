@@ -3,11 +3,11 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
-	"time"
 	"net"
+	"os"
+	_ "strings"
 	"sync"
-	_"strings"
+	"time"
 
 	"github.com/tarm/serial"
 )
@@ -20,15 +20,14 @@ const (
 )
 
 var (
-    wg 			 sync.WaitGroup
-	content 	 chan string
-	passitem     int
+	wg       sync.WaitGroup
+	content  chan string
+	passitem int
 )
-
 
 func main() {
 	wg.Add(2)
-	
+
 	content = make(chan string)
 	fmt.Printf("start test | All %d items\n", len(casetable))
 	go ServerRoutine("tcp")
@@ -42,8 +41,8 @@ func ServerRoutine(serverType string) {
 
 	l, err := net.Listen(serverType, address+":"+port)
 	if err != nil {
-		fmt.Println("Error listening: ",err)
-		time.Sleep(time.Second*time.Duration(5))
+		fmt.Println("Error listening: ", err)
+		time.Sleep(time.Second * time.Duration(5))
 		os.Exit(1)
 	}
 	defer l.Close()
@@ -72,48 +71,48 @@ func handleRequest(conn net.Conn) {
 
 func AtTestRoutine() {
 	defer wg.Done()
-	
+
 	fmt.Println("start open COM")
-	time.Sleep(time.Second*time.Duration(12))
+	time.Sleep(time.Second * time.Duration(12))
 
 	s := OpenCom()
 
 	for _, cmd := range casetable {
-		ExecAT(s, &cmd);
+		ExecAT(s, &cmd)
 		CheckRes(&cmd)
 	}
-	
+
 	fmt.Println("=========== Summary ============")
 	fmt.Printf("Pass: %d | Failed: %d\n", passitem, len(casetable)-passitem)
-	time.Sleep(time.Second*time.Duration(5))
+	time.Sleep(time.Second * time.Duration(5))
 }
 
 func CheckRes(cmd *atcmd) {
 	res := <-content
 	if cmd.hasURC {
 		// here will block to wait the qiopen urc
-		res = <- content
+		res = <-content
 		if cmd.URCContent != res {
-			fmt.Printf("Failed! CMD:%q | Expect: %q Get: %q\n", 
-			           cmd.command, 
-					   cmd.expect, 
-					   string(res))
+			fmt.Printf("Failed! CMD:%q | Expect: %q Get: %q\n",
+				cmd.command,
+				cmd.expect,
+				string(res))
 		}
 		return
 	}
-	
+
 	if string(res) != cmd.expect {
-		fmt.Printf("Failed! CMD:%q | Expect: %q Get: %q\n", 
-		           cmd.command, 
-				   cmd.expect, 
-				   string(res))
+		fmt.Printf("Failed! CMD:%q | Expect: %q Get: %q\n",
+			cmd.command,
+			cmd.expect,
+			string(res))
 	}
 
 	passitem++
 }
 
 func OpenCom() *serial.Port {
-	c := &serial.Config {
+	c := &serial.Config{
 		Name: name,
 		Baud: baud,
 	}
@@ -135,15 +134,15 @@ func ExecAT(s *serial.Port, cmd *atcmd) {
 	if err != nil {
 		fmt.Println(err)
 	}
-	
+
 }
 
 // ReadCOM should always read the serial port
 // but here may contain a porblem: if there are more
-// than one piece of data come to port, the result may become 
+// than one piece of data come to port, the result may become
 // dirty.so the check function will be more complicated.
 func ReadCOM(s *serial.Port) {
-	
+
 	for {
 		buf := make([]byte, 2048)
 		n, err := s.Read(buf)
