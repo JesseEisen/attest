@@ -2,13 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
-	"net"
 	"os"
-	_ "strings"
-	"sync"
 	"time"
-
+	"strings"
+	
 	"github.com/tarm/serial"
 )
 
@@ -20,54 +17,12 @@ const (
 )
 
 var (
-	wg       sync.WaitGroup
-	content  chan string
-	passitem int
+	content    chan string
+	sendnotify chan int
+	passitem   int
+	failitem   int
 )
 
-func main() {
-	wg.Add(2)
-
-	content = make(chan string)
-	fmt.Printf("start test | All %d items\n", len(casetable))
-	go ServerRoutine("tcp")
-	go AtTestRoutine()
-
-	wg.Wait()
-}
-
-func ServerRoutine(serverType string) {
-	defer wg.Done()
-
-	l, err := net.Listen(serverType, address+":"+port)
-	if err != nil {
-		fmt.Println("Error listening: ", err)
-		time.Sleep(time.Second * time.Duration(5))
-		os.Exit(1)
-	}
-	defer l.Close()
-	fmt.Printf("Server is Listening on %s...\n", port)
-
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			fmt.Println("Error accept ", err)
-			os.Exit(1)
-		}
-
-		fmt.Printf("Server: Received message %s -> %s \n", conn.RemoteAddr(), conn.LocalAddr())
-
-		go handleRequest(conn)
-	}
-}
-
-func handleRequest(conn net.Conn) {
-	defer conn.Close()
-
-	for {
-		io.Copy(conn, conn)
-	}
-}
 
 func AtTestRoutine() {
 	defer wg.Done()
@@ -79,33 +34,41 @@ func AtTestRoutine() {
 
 	for _, cmd := range casetable {
 		ExecAT(s, &cmd)
-		CheckRes(&cmd)
+		CheckRes(s, &cmd)
 	}
 
 	fmt.Println("=========== Summary ============")
-	fmt.Printf("Pass: %d | Failed: %d\n", passitem, len(casetable)-passitem)
+	fmt.Printf("Pass: %d | Failed: %d\n", passitem, failitem)
 	time.Sleep(time.Second * time.Duration(5))
 }
 
-func CheckRes(cmd *atcmd) {
+func CheckRes(s *serial.Port, cmd *atcmd) {
 	res := <-content
-	if cmd.hasURC {
-		// here will block to wait the qiopen urc
-		res = <-content
-		if cmd.URCContent != res {
-			fmt.Printf("Failed! CMD:%q | Expect: %q Get: %q\n",
-				cmd.command,
-				cmd.expect,
-				string(res))
-		}
+	
+	// if is urc, we just skip it
+	if strings.Contains(res, "URC") {
 		return
 	}
 
-	if string(res) != cmd.expect {
+	if cmd.hasURC {
+		// here will block to wait the qiopen urc
+		res = <-content
+		if cmd.urcContent != res {
+			fmt.Printf("Failed! CMD:%q | Expect: %q Get: %q\n",
+				cmd.command,
+				cmd.expect,
+				res)
+			failitem++
+			return
+		}
+	}
+
+	if res != cmd.expect {
 		fmt.Printf("Failed! CMD:%q | Expect: %q Get: %q\n",
 			cmd.command,
 			cmd.expect,
-			string(res))
+			res)
+		failitem++
 	}
 
 	passitem++
@@ -129,12 +92,24 @@ func OpenCom() *serial.Port {
 }
 
 func ExecAT(s *serial.Port, cmd *atcmd) {
-
+	
+	fmt.Printf("[CMD] %s\n", cmd.command)
 	_, err := s.Write([]byte(cmd.command))
 	if err != nil {
 		fmt.Println(err)
 	}
 
+	if cmd.hasSend {
+		_, err := s.Write([]byte(cmd.sendContent))
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
+
+	// notify server to send data to UE
+	if cmd.bnextrd {
+		sendnotify <- cmd.readitem
+	}
 }
 
 // ReadCOM should always read the serial port
